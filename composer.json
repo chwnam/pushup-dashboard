@@ -1,0 +1,16 @@
+{
+    "name": "changwoo/pushup-dashboard",
+    "description": "'우리 같이 푸시업해요' 웹사이트의 대시보드.",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "authors": [
+        {
+            "name": "changwoo",
+            "email": "ep6tri@hotmail.com"
+        }
+    ],
+    "minimum-stability": "stable",
+    "require": {
+        "php": "^8.2"
+    }
+}

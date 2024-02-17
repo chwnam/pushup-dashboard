@@ -1,0 +1,29 @@
+{
+  "name": "changwoo/pushup-dashboard-deployer",
+  "type": "standalone-script",
+  "license": "GPL-2.0-or-later",
+  "authors": [
+    {
+      "name": "changwoo",
+      "email": "ep6tri@hotmail.com"
+    }
+  ],
+  "minimum-stability": "stable",
+  "autoload": {
+    "psr-4": {
+      "Changwoo\\Pushup\\Dashboard\\Deployer\\": "src/"
+    }
+  },
+  "autoload-dev": {
+  },
+  "require": {
+    "php": "^8.2",
+    "vlucas/phpdotenv": "^5.6"
+  },
+  "require-dev": {
+    "deployer/deployer": "^7.3"
+  },
+  "scripts": {
+    "deploy": "dep"
+  }
+}
