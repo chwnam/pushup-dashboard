@@ -8,6 +8,77 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+const PD_MAIN       = __FILE__;
+const PD_DB_VERSION = '1.0.0';
+const PD_VERSION    = '1.0.0';
+
+
+if ( ! function_exists( 'pushup_dashboard_on_activation' ) ) {
+	function pushup_dashboard_on_activation(): void {
+		global $wpdb;
+
+		$query = "CREATE TABLE {$wpdb->prefix}pushup_counts (\n" .
+		         "datetime DATETIME NOT NULL COMMENT '작성시각',\n" .
+		         "email varchar(255) NOT NULL COMMENT '이메일',\n" .
+		         "submit_date date NOT NULL COMMENT '제출한 날짜',\n" .
+		         "submit_time time DEFAULT NULL COMMENT '제출한 시간',\n" .
+		         "count int(10) unsigned NOT NULL COMMENT '횟수',\n" .
+		         "PRIMARY KEY  (datetime, email),\n" .
+		         "KEY idx_email (email) COMMENT '이메일 인덱스',\n" .
+		         "KEY idx_submit_date (submit_date) COMMENT '제출한 날짜 인덱스'\n" .
+		         ") ENGINE=InnoDB " . $wpdb->get_charset_collate() . " COMMENT='푸시업기록 테이블'";
+
+		if ( ! function_exists( 'dbDelta' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+		}
+
+		dbDelta( $query );
+
+		$db_version = get_option( 'pd_db_version' );
+		if ( ! $db_version ) {
+			update_option( 'pd_db_version', PD_DB_VERSION );
+		}
+	}
+
+	register_activation_hook( __FILE__, 'pushup_dashboard_on_activation' );
+}
+
+if ( ! function_exists( 'pushup_dashboard_on_deactivation' ) ) {
+	function pushup_dashboard_on_deactivation(): void { }
+
+	register_deactivation_hook( __FILE__, 'pushup_dashboard_on_deactivation' );
+}
+
+if (
+	! function_exists( 'pushup_dashboard_invalid_client' ) && (
+		! defined( 'PD_CLIENT_ID' ) || empty( PD_CLIENT_ID ) ||
+		! defined( 'PD_CLIENT_SECRET' ) || empty( PD_CLIENT_SECRET )
+	)
+) {
+	function pushup_dashboard_invalid_client(): void {
+		echo '<div class="notice notice-error"><p>';
+
+		$message = '';
+
+		if ( ! defined( 'PD_CLIENT_ID' ) || empty( PD_CLIENT_ID ) ) {
+			$message .= ' PD_CLIENT_ID';
+		}
+
+		if ( ! defined( 'PD_CLIENT_SECRET' ) || empty( PD_CLIENT_SECRET ) ) {
+			$message .= empty( $message ) ? '' : ', ';
+			$message .= ' PD_CLIENT_SECRET 값을 채워 주세요.';
+		}
+
+		echo esc_html( trim( $message ) );
+
+		echo '</p></div>';
+	}
+
+	add_action( 'admin_notices', 'pushup_dashboard_invalid_client' );
+
+	return;
+}
+
 if ( ! function_exists( 'pushup_dashboard_admin_menu' ) ) {
 	function pushup_dashboard_admin_menu(): void {
 		add_options_page(
@@ -100,7 +171,6 @@ if ( ! function_exists( 'pushup_dashboard_flow_1_authorize' ) ) {
 		$state        = wp_generate_password();
 		$redirect_uri = pushup_dashboard_get_redirect_uri();
 		$scope        = pushup_dashboard_get_scope();
-		$prompt       = 'production' === wp_get_environment_type() ? '' : 'consent';
 
 		set_transient( '_pdstate', $state, 10 * MINUTE_IN_SECONDS );
 
@@ -112,7 +182,7 @@ if ( ! function_exists( 'pushup_dashboard_flow_1_authorize' ) ) {
 					'response_type' => 'code',
 					'scope'         => $scope,
 					'access_type'   => 'offline',
-					'prompt'        => $prompt,
+					'prompt'        => 'consent',
 					'state'         => $state,
 				]
 			),
@@ -155,7 +225,7 @@ if ( ! function_exists( 'pushup_dashboard_flow_2_get_token' ) ) {
 			wp_die( 'Wrong response code.' );
 		}
 
-		$body = json_decode( wp_remote_retrieve_body( $response ) );
+		$body = json_decode( wp_remote_retrieve_body( $response ), true );
 
 		set_site_transient(
 			'pd_oauth_token',
@@ -174,6 +244,10 @@ if ( ! function_exists( 'pushup_dashboard_flow_3_refresh_token' ) ) {
 	function pushup_dashboard_refresh_token(): void {
 		$credentials = pushup_dashboard_get_credentials();
 		$token_info  = get_site_transient( 'pd_oauth_token' );
+
+		if ( false === $token_info ) {
+			return;
+		}
 
 		$body          = (array) $token_info['body'];
 		$timestamp     = $token_info['timestamp'];
@@ -242,13 +316,57 @@ if ( ! function_exists( 'pushup_dashboard_get_profile' ) ) {
 }
 
 if ( ! function_exists( 'pushup_dashboard_get_spreadsheet_data' ) ) {
-	function pushup_dashboard_get_spreadsheet_data(): array {
+	/**
+	 * @return array|WP_Error
+	 *
+	 * @example 아래는 응답 샘플
+	 *
+	 * array(
+	 *     'range'          => "'설문지 응답 시트1'!A1:E137",
+	 *     'majorDimension' => 'ROWS',
+	 *     'values'         => array(
+	 *         array(
+	 *             '타임스탬프',
+	 *             '이메일 주소',
+	 *             '[필수] 기록할 날짜는?',
+	 *             '[선택] 푸쉬업한 시간은? (하루에 여러번 입력한 경우 나누어 기록할 수 있어요)',
+	 *             '[필수] 횟수를 적어 주세요.',
+	 *         ),
+	 *         array(
+	 *             '2024. 2. 8 오전 10:19:54',
+	 *             'john@email.com',
+	 *             '2024. 2. 8',
+	 *             '오후 3:00:00',
+	 *             '50',
+	 *         ),
+	 *         array(
+	 *             '2024. 2. 8 오후 9:03:57',
+	 *             'jane@email.com',
+	 *             '2024. 1. 28',
+	 *             '',
+	 *             '20',
+	 *         ),
+	 *         ....
+	 *     ),
+	 * );
+	 *
+	 * 1. values 첫번째는 헤더.
+	 * 2. 타임스탬프는 구글 폼이 기록한 폼 접수일시.
+	 * 3. 날짜는 필수, 시간은 옵션
+	 */
+	function pushup_dashboard_get_spreadsheet_data(): array|WP_Error {
+		pushup_dashboard_refresh_token();
+
 		$token_info     = get_site_transient( 'pd_oauth_token' );
 		$access_token   = $token_info['body']['access_token'] ?? false;
 		$spreadsheet_id = defined( 'PD_SHEET_ID' ) ? PD_SHEET_ID : '';
 
-		if ( ! $spreadsheet_id || ! $access_token ) {
-			return [];
+		if ( ! $access_token ) {
+			return new WP_Error( 'error', 'OAuth 인증이 필요합니다.' );
+		}
+
+		if ( ! $spreadsheet_id ) {
+			return new WP_Error( 'error', 'PD_SHEET_ID 상수가 필요합니다.' );
 		}
 
 		$response = wp_remote_get(
@@ -261,9 +379,148 @@ if ( ! function_exists( 'pushup_dashboard_get_spreadsheet_data' ) ) {
 		);
 
 		if ( 200 !== wp_remote_retrieve_response_code( $response ) ) {
-			return [];
+			return new WP_Error( 'error', 'API 호출 에러.' );
 		}
 
+
 		return json_decode( wp_remote_retrieve_body( $response ), true );
+	}
+}
+
+if ( ! function_exists( 'pushup_dashboard_query_pushup_count' ) ) {
+	function pushup_dashboard_query_pushup_count(): array {
+		global $wpdb;
+
+		$query = "SELECT * FROM {$wpdb->prefix}pushup_counts";
+
+		return $wpdb->get_results( $query );
+	}
+}
+
+if ( ! function_exists( 'pushup_dashboard_parse_datetime' ) ) {
+	function pushup_dashboard_parse_datetime( string $input ): DateTime|false {
+		$pattern  = '/(?<year>\d{4}). (?<month>\d{1,2}). (?<day>\d{1,2}) (?<meridiem>오전|오후) (?<hour>\d{1,2}):(?<minute>\d{2}):(?<second>\d{2})/';
+		$timezone = new DateTimeZone( 'Asia/Seoul' );
+
+		if ( preg_match( $pattern, $input, $matches ) ) {
+			try {
+				$output = new DateTime( 'now', $timezone );
+			} catch ( Exception ) {
+				return false;
+			}
+
+			$output->setDate(
+				$matches['year'],
+				$matches['month'],
+				$matches['day'],
+			);
+
+			$output->setTime(
+				( '오전' == $matches['meridiem'] ? 0 : 12 ) + (int) $matches['hour'],
+				(int) $matches['minute'],
+				(int) $matches['second'],
+			);
+
+			return $output;
+		}
+
+		return false;
+	}
+}
+
+if ( ! function_exists( 'pushup_dashboard_add_menu_page' ) ) {
+	function pushup_dashboard_add_menu_page(): void {
+		add_menu_page(
+			page_title: '푸시업 대시보드',
+			menu_title: '푸시업 대시보드',
+			capability: 'administrator',
+			menu_slug: 'pushup-dashboard',
+			callback: 'pushup_dashboard_output_dashboard_page',
+			icon_url: 'dashicons-megaphone',
+		);
+	}
+
+	add_action( 'admin_menu', 'pushup_dashboard_add_menu_page' );
+}
+
+if ( ! function_exists( 'pushup_dashboard_update_database' ) ) {
+	function pushup_dashboard_update_database(): void {
+		global $wpdb;
+
+		$data = pushup_dashboard_get_spreadsheet_data();
+		if ( is_wp_error( $data ) ) {
+			error_log( $data->get_error_message() );
+			wp_die( $data );
+		}
+
+		if ( ! isset( $data['values'] ) ) {
+			return;
+		}
+
+		$values = [];
+
+		foreach ( array_slice( $data['values'], 1 ) as $value ) {
+			$datetime    = pushup_dashboard_parse_datetime( $value[0] );
+			$email       = sanitize_email( $value[1] );
+			$submit_date = date_create_from_format( 'Y. n. j', $value[2] );
+
+			if ( $submit_date ) {
+				$submit_date = $submit_date->format( 'Y-m-d' );
+			} else {
+				$submit_date = '';
+			}
+
+			if ( $value[3] ) {
+				$submit_time = preg_replace_callback(
+					'/(오전|오후) (\d{1,2}):(\d{2}):(\d{2})/',
+					function ( $matches ) {
+						return sprintf(
+							'%02d:%02d:%02d',
+							( $matches[1] == '오전' ? 0 : 12 ) + (int) $matches[2],
+							(int) $matches[3],
+							(int) $matches[4],
+						);
+					},
+					$value[3]
+				);
+			} else {
+				$submit_time = '';
+			}
+
+			$count = (int) $value[4];
+
+			$values[] = [
+				$datetime->format( "y-m-d H:i:s" ),
+				$email,
+				$submit_date,
+				$submit_time,
+				$count,
+			];
+		}
+
+		if ( $values ) {
+			$buffer = [];
+			foreach ( $values as $value ) {
+				$buffer[] = $wpdb->prepare( '(%s, %s, %s, %s, %d)', $value );
+			}
+			$query = "INSERT IGNORE INTO {$wpdb->prefix}pushup_counts VALUES ";
+			$query .= implode( ', ', $buffer );
+			$wpdb->query( $query );
+		}
+	}
+}
+
+if ( ! function_exists( 'pushup_dashboard_output_dashboard_page' ) ) {
+	function pushup_dashboard_output_dashboard_page(): void {
+//		pushup_dashboard_update_database();
+		$data = pushup_dashboard_query_pushup_count();
+		?>
+        <div class="wrap">
+			<pre>
+			<?php
+			print_r( $data ); ?>
+			</pre>
+        </div>
+		<?php
 	}
 }
