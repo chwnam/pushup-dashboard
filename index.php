@@ -388,10 +388,30 @@ if ( ! function_exists( 'pushup_dashboard_get_spreadsheet_data' ) ) {
 }
 
 if ( ! function_exists( 'pushup_dashboard_query_pushup_count' ) ) {
-	function pushup_dashboard_query_pushup_count(): array {
+	function pushup_dashboard_query_pushup_count( string|array $args = [] ): array {
 		global $wpdb;
 
-		$query = "SELECT * FROM {$wpdb->prefix}pushup_counts";
+		$defaults = [
+			'email' => '',
+			'year'  => '',
+			'month' => '',
+		];
+
+		$args = wp_parse_args( $args, $defaults );
+
+		// Build where clause.
+		$where = "WHERE 1=1";
+		if ( ! empty( $args['email'] ) ) {
+			$where .= $wpdb->prepare( " AND email=%s", $args['email'] );
+		}
+		if ( ! empty( $args['year'] ) ) {
+			$where .= $wpdb->prepare( " AND YEAR(submit_date)=%d", $args['year'] );
+		}
+		if ( ! empty( $args['month'] ) ) {
+			$where .= $wpdb->prepare( " AND MONTH(submit_date)=%d", $args['month'] );
+		}
+
+		$query = "SELECT * FROM {$wpdb->prefix}pushup_counts $where";
 
 		return $wpdb->get_results( $query );
 	}
@@ -512,15 +532,278 @@ if ( ! function_exists( 'pushup_dashboard_update_database' ) ) {
 
 if ( ! function_exists( 'pushup_dashboard_output_dashboard_page' ) ) {
 	function pushup_dashboard_output_dashboard_page(): void {
-//		pushup_dashboard_update_database();
-		$data = pushup_dashboard_query_pushup_count();
+		$rows = pushup_dashboard_query_pushup_count();
 		?>
         <div class="wrap">
-			<pre>
-			<?php
-			print_r( $data ); ?>
-			</pre>
+            <h1>푸시업 시트</h1>
+            <table class="wp-list-table widefat striped">
+                <thead>
+                <tr>
+                    <th>순서</th>
+                    <th>타임스탬프</th>
+                    <th>이메일</th>
+                    <th>날짜</th>
+                    <th>시간 (옵션)</th>
+                    <th>횟수</th>
+                </tr>
+                </thead>
+                <tbody>
+				<?php
+				foreach ( $rows as $idx => $row ) : ?>
+                    <tr>
+                        <td><?php
+							echo absint( $idx + 1 ); ?></td>
+                        <td><?php
+							echo esc_html( $row->datetime ); ?></td>
+                        <td><?php
+							echo esc_html( $row->email ); ?></td>
+                        <td><?php
+							echo esc_html( $row->submit_date ); ?></td>
+                        <td><?php
+							echo esc_html( $row->submit_time ); ?></td>
+                        <td><?php
+							echo esc_html( $row->count ); ?></td>
+                    </tr>
+				<?php
+				endforeach; ?>
+                </tbody>
+            </table>
+
+            <p class="submit">
+                <a
+                        class="button button-primary"
+                        href="<?php
+						$url = add_query_arg(
+							[
+								'action' => 'pushup_dashboard_update_database',
+								'nonce'  => wp_create_nonce( 'pushup_dashboard' ),
+							],
+							admin_url( 'admin-post.php' )
+						);
+						echo esc_url( $url );
+						?>"
+                        role="button">데이터베이스 업데이트</a>
+            </p>
         </div>
 		<?php
+	}
+}
+
+if ( ! function_exists( 'pushup_dashboard_admin_post_update_database' ) ) {
+	function pushup_dashboard_admin_post_update_database(): void {
+		check_admin_referer( 'pushup_dashboard', 'nonce' );
+		pushup_dashboard_update_database();
+		$referer = wp_get_referer();
+		echo '<script>alert("업데이트를 마쳤습니다."); location.href="' . esc_url_raw( $referer ) . '";</script>';
+	}
+
+	add_action( 'admin_post_pushup_dashboard_update_database', 'pushup_dashboard_admin_post_update_database' );
+}
+
+if ( ! function_exists( 'pushup_dashboard_front' ) ) {
+	function pushup_dashboard_front(): string {
+		$rows   = [];
+		$email  = wp_unslash( $_GET['email'] ?? '' );
+		$nonce  = wp_unslash( $_GET['_wpnonce'] ?? '' );
+		$submit = isset( $_GET['submit'] );
+		$year   = 2024;
+		$month  = 2;
+
+		if ( $email ) {
+			if ( ! $submit || ! wp_verify_nonce( $nonce, 'pushup_dashboard' ) ) {
+				wp_die( 'Nonce verification error!' );
+			}
+			$rows = pushup_dashboard_query_pushup_count( "email=$email&year=$year&month=$month" );
+		}
+
+		ob_start();
+		?>
+
+        <style>
+            .pushup-dashboard .result-table {
+                border-collapse: collapse;
+                width: 100%;
+
+                th, td {
+                    padding: 0.5rem 1rem;
+                }
+
+                thead th {
+                    background-color: var(--wp--preset--color--contrast);
+                    border-bottom: 1px solid var(--wp--preset--color--contrast);
+                    border-top: 1px solid var(--wp--preset--color--contrast);
+                    color: var(--wp--preset--color--base);
+                }
+
+                tbody tr:nth-of-type(2n) {
+                    background-color: #eaeaea;
+                }
+            }
+        </style>
+
+        <div class="pushup-dashboard">
+		<?php
+		// Print default query screen.
+		if ( empty( $email ) ) : ?>
+            <form
+                    id="front-dashboard"
+                    class="wp-block-search__button-outside wp-block-search__text-button wp-block-search"
+                    method="get" action="" role="search"
+            >
+                <label class="wp-block-search__label" for="email">이메일</label>
+                <div class="wp-block-search__inside-wrapper ">
+                    <input
+                            id="email"
+                            name="email"
+                            class="wp-block-search__input"
+                            type="email"
+                            required="required"
+                            value="<?php
+							echo esc_attr( $email ); ?>"
+                    >
+                    <button
+                            id="submit"
+                            class="button wp-block-search__button wp-element-button"
+                            name="submit">조회하기
+                    </button>
+                </div>
+
+				<?php
+				wp_nonce_field( 'pushup_dashboard', '_wpnonce', false ); ?>
+            </form>
+            </div>
+		<?php
+		// Print queried result.
+		else : ?>
+
+			<?php
+			// Result found.
+			if ( $rows ) : ?>
+
+                <section>
+                    <h4><?php
+						echo esc_html( sprintf( '%s 님의 %d년 %d월 결산', $email, $year, $month ) ); ?>
+                    </h4>
+                    <ul class="">
+                        <li><?php
+							echo esc_html( sprintf( '총 제출 횟수는 %d번 입니다.', count( $rows ) ) ); ?>
+                        </li>
+                        <li><?php
+							echo esc_html( sprintf( '총 수행 횟수는 총 %d회 입니다.',
+								array_sum( wp_list_pluck( $rows, 'count' ) ) ) ); ?>
+                        </li>
+                        <li><?php
+							[ $streak, $min_date, $max_date ] = pushup_dashboard_get_max_streak( $rows );
+							echo esc_html(
+								sprintf(
+									'최대 연속 제출은 %s 부터 %s 까지 총 %d회 입니다.',
+									mysql2date( 'm월 d일', $min_date ),
+									mysql2date( 'm월 d일', $max_date ),
+									$streak
+								)
+							); ?>
+                        </li>
+                    </ul>
+                </section>
+
+                <table class="result-table">
+                    <thead>
+                    <tr>
+                        <th class="sequence">번호</th>
+                        <th class="submit_date">날짜</th>
+                        <th class="submit_time">시간</th>
+                        <th class="count">횟수</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+					<?php
+					// Loop
+					foreach ( $rows as $idx => $row ) : ?>
+                        <tr>
+                            <td class="sequence"><?php
+								echo absint( $idx + 1 ); ?>
+                            </td>
+
+                            <td class="submit_date"><?php
+								echo esc_html( mysql2date( 'm월 d일', $row->submit_date ) ); ?>
+                            </td>
+
+                            <td class="submit_time"><?php
+								echo esc_html( '00:00:00' !== $row->submit_time ? $row->submit_time : '-' ); ?>
+                            </td>
+
+                            <td class="count"><?php
+								echo absint( $row->count ); ?>
+                            </td>
+                        </tr>
+					<?php
+					endforeach; ?>
+                    </tbody>
+                </table>
+
+			<?php
+			// No results.
+			else : ?>
+                <p>입력한 이메일로 조회된 내역이 없습니다.</p>
+
+			<?php
+			endif; ?>
+
+            <p>
+                <a
+                        class="button wp-block-search__button wp-element-button"
+                        href="<?php
+						echo esc_url( remove_query_arg( [ 'email', 'submit', '_wpnonce' ] ) ); ?>"
+                >돌아가가</a>
+            </p>
+		<?php
+		endif; ?>
+
+		<?php
+		return ob_get_clean();
+	}
+
+	add_shortcode( 'pushup_dashboard_front', 'pushup_dashboard_front' );
+}
+
+if ( ! function_exists( 'pushup_dashboard_get_max_streak' ) ) {
+	function pushup_dashboard_get_max_streak( array $rows ): array {
+		if ( ! $rows ) {
+			return [ 0, '', '' ];
+		}
+
+		$streaks     = [];
+		$max_streaks = [];
+		$today       = '';
+		$tomorrow    = '';
+
+		reset( $rows );
+		$row = current( $rows );
+
+		do {
+			$submit_date = $row->submit_date;
+
+			if ( $submit_date !== $today && $submit_date !== $tomorrow ) {
+				if ( count( $streaks ) > count( $max_streaks ) ) {
+					$max_streaks = $streaks;
+				}
+				$streaks = [ $submit_date ];
+			} else {
+				if ( $submit_date == $tomorrow ) {
+					$streaks[] = $submit_date;
+				}
+			}
+
+			$today    = $submit_date;
+			$date     = date_create_from_format( 'Y-m-d', $submit_date );
+			$date     = $date->add( new DateInterval( 'P1D' ) );
+			$tomorrow = $date->format( 'Y-m-d' );
+		} while ( ( $row = next( $rows ) ) );
+
+		return [
+			count( $max_streaks ),
+			$max_streaks[0],
+			$max_streaks[ count( $max_streaks ) - 1 ],
+		];
 	}
 }
