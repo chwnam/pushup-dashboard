@@ -610,7 +610,8 @@ if ( ! function_exists( 'pushup_dashboard_front' ) ) {
 
 		$now       = date_create_immutable( 'now', wp_timezone() );
 		$year      = 2024;
-		$cur_month = ( (int) $now->format( 'n' ) ) - 1;
+		$cur_year  = (int) $now->format( 'Y' );
+		$cur_month = $year === $cur_year ? ( (int) $now->format( 'n' ) ) - 1 : 12;
 		$month     = wp_unslash( $_GET['month'] ?? '' );
 
 		if ( $email ) {
