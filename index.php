@@ -44,7 +44,8 @@ if ( ! function_exists( 'pushup_dashboard_on_activation' ) ) {
 }
 
 if ( ! function_exists( 'pushup_dashboard_on_deactivation' ) ) {
-	function pushup_dashboard_on_deactivation(): void { }
+	function pushup_dashboard_on_deactivation(): void {
+	}
 
 	register_deactivation_hook( __FILE__, 'pushup_dashboard_on_deactivation' );
 }
@@ -606,8 +607,11 @@ if ( ! function_exists( 'pushup_dashboard_front' ) ) {
 		$email  = wp_unslash( $_GET['email'] ?? '' );
 		$nonce  = wp_unslash( $_GET['_wpnonce'] ?? '' );
 		$submit = isset( $_GET['submit'] );
-		$year   = 2024;
-		$month  = 2;
+
+		$now       = date_create_immutable( 'now', wp_timezone() );
+		$year      = 2024;
+		$cur_month = ( (int) $now->format( 'n' ) ) - 1;
+		$month     = wp_unslash( $_GET['month'] ?? '' );
 
 		if ( $email ) {
 			if ( ! $submit || ! wp_verify_nonce( $nonce, 'pushup_dashboard' ) ) {
@@ -639,6 +643,48 @@ if ( ! function_exists( 'pushup_dashboard_front' ) ) {
                     background-color: #eaeaea;
                 }
             }
+
+            .pushup-dashboard .justify-end {
+                justify-content: flex-end;
+            }
+
+            .pushup-dashboard-field-wrap {
+                display: flex;
+                width: 100%;
+                margin-top: 1rem;
+                margin-bottom: 0.25rem;
+            }
+
+            .pushup-dashboard-label {
+                display: inline-block;
+                align-self: center;
+                width: 6rem;
+            }
+
+            .pushup-dashboard-input {
+                appearance: none;
+                border-radius: .33rem;
+                border: 1px solid #949494;
+                font-size: var(--wp--preset--font-size--small);
+                flex-grow: 1;
+                margin-left: 0;
+                margin-right: 0;
+                min-width: 3rem;
+                padding: 8px;
+                text-decoration: unset !important;
+            }
+
+            .pushup-dashboard-field-wrap select {
+                appearance: none;
+                border-radius: .33rem;
+                border: 1px solid #949494;
+                font-size: var(--wp--preset--font-size--small);
+                margin-left: 0;
+                margin-right: 0;
+                min-width: 6rem;
+                padding: 8px;
+            }
+
         </style>
 
         <div class="pushup-dashboard">
@@ -650,17 +696,34 @@ if ( ! function_exists( 'pushup_dashboard_front' ) ) {
                     class="wp-block-search__button-outside wp-block-search__text-button wp-block-search"
                     method="get" action="" role="search"
             >
-                <label class="wp-block-search__label" for="email">이메일</label>
-                <div class="wp-block-search__inside-wrapper ">
+                <div class="pushup-dashboard-field-wrap">
+                    <label class="pushup-dashboard-label" for="email">이메일</label>
                     <input
                             id="email"
                             name="email"
-                            class="wp-block-search__input"
+                            class="pushup-dashboard-input"
                             type="email"
                             required="required"
-                            value="<?php
-							echo esc_attr( $email ); ?>"
+                            value="<?php echo esc_attr( $email ); ?>"
                     >
+                </div>
+                <div class="pushup-dashboard-field-wrap">
+                    <label class="pushup-dashboard-label" for="month">월</label>
+                    <select
+                            id="month"
+                            name="month"
+                            required="required"
+                    >
+						<?php
+						// 2월부터 시작해서, 2월이 최하값이다.
+						for ( $m = $cur_month; $m > 1; $m -- ): ?>
+                            <option value="<?php echo esc_attr( $m ); ?>" <?php selected( $m, $month ); ?>>
+								<?php echo esc_html( $m ); ?>월
+                            </option>
+						<?php endfor; ?>
+                    </select>
+                </div>
+                <div class="pushup-dashboard-field-wrap justify-end">
                     <button
                             id="submit"
                             class="button wp-block-search__button wp-element-button"
